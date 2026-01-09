@@ -1,42 +1,74 @@
-use std::io;
 use std::time::Duration;
 
+use anyhow::Result;
 use crossterm::event::Event;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use tokio::task::JoinHandle;
 use tui_cells::Cell;
 use tui_core::{InputHandler, InputResult};
 use tui_input::Textarea;
 use tui_terminal::Terminal;
 
+pub mod protocol;
+
+use protocol::{ChatMessage, OpenAIClient};
+
 pub struct App {
     history: Vec<Cell>,
+    chat_history: Vec<ChatMessage>,
     input: Textarea,
+    client: OpenAIClient,
+    pending_response: Option<JoinHandle<Result<String>>>,
     should_exit: bool,
 }
 
-impl Default for App {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl App {
-    pub fn new() -> Self {
+    pub fn new(client: OpenAIClient) -> Self {
         Self {
             history: Vec::new(),
+            chat_history: Vec::new(),
             input: Textarea::new(),
+            client,
+            pending_response: None,
             should_exit: false,
         }
     }
 
-    pub fn run(mut self, terminal: &mut Terminal) -> io::Result<()> {
-        while !self.should_exit {
+    pub async fn run(mut self, terminal: &mut Terminal) -> Result<()> {
+        loop {
             terminal.draw(|frame| self.render(frame))?;
 
-            if let Some(event) = tui_terminal::poll_event(Duration::from_millis(100))? {
+            if self.should_exit {
+                break;
+            }
+
+            if let Some(handle) = self.pending_response.as_mut() {
+                tokio::select! {
+                    result = handle => {
+                        self.pending_response = None;
+                        match result {
+                            Ok(Ok(response)) => {
+                                self.chat_history.push(ChatMessage::assistant(&response));
+                                self.history.push(Cell::agent(response));
+                            }
+                            Ok(Err(e)) => {
+                                self.history.push(Cell::agent(format!("**Error:** {}", e)));
+                            }
+                            Err(e) => {
+                                self.history.push(Cell::agent(format!("**Error:** {}", e)));
+                            }
+                        }
+                    }
+                    _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                        if let Some(event) = tui_terminal::poll_event(Duration::from_millis(1))? {
+                            self.handle_event(event);
+                        }
+                    }
+                }
+            } else if let Some(event) = tui_terminal::poll_event(Duration::from_millis(100))? {
                 self.handle_event(event);
             }
         }
@@ -78,6 +110,13 @@ impl App {
             }
         }
 
+        if self.pending_response.is_some() {
+            lines.push(Line::styled(
+                "Thinking...",
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+
         let total_lines = lines.len() as u16;
         let scroll_offset = total_lines.saturating_sub(area.height);
 
@@ -90,9 +129,13 @@ impl App {
     }
 
     fn render_input(&self, frame: &mut ratatui::Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::TOP)
-            .title(" Message ");
+        let title = if self.pending_response.is_some() {
+            " Message (waiting...) "
+        } else {
+            " Message "
+        };
+
+        let block = Block::default().borders(Borders::TOP).title(title);
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -103,10 +146,16 @@ impl App {
         if let Event::Key(key) = event {
             match self.input.handle_key(key) {
                 InputResult::Submit(text) => {
-                    if !text.trim().is_empty() {
+                    if !text.trim().is_empty() && self.pending_response.is_none() {
                         self.history.push(Cell::user(&text));
-                        let response = generate_mock_response(&text);
-                        self.history.push(Cell::agent(response));
+                        self.chat_history.push(ChatMessage::user(&text));
+
+                        let client = self.client.clone();
+                        let messages = self.chat_history.clone();
+
+                        self.pending_response = Some(tokio::spawn(async move {
+                            client.chat(messages).await
+                        }));
                     }
                 }
                 InputResult::Exit => {
@@ -116,17 +165,4 @@ impl App {
             }
         }
     }
-}
-
-fn generate_mock_response(input: &str) -> String {
-    format!(
-        "I received your message: **\"{}\"**\n\n\
-         This is a *mock response* from the agent. \
-         In the full implementation, this would come from an actual AI backend.\n\n\
-         Some features:\n\
-         - Markdown rendering\n\
-         - `Code` formatting\n\
-         - **Bold** and *italic* text",
-        input
-    )
 }
