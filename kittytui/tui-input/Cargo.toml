@@ -1,0 +1,10 @@
+[package]
+name = "tui-input"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tui-core.workspace = true
+crossterm.workspace = true
+ratatui.workspace = true
+unicode-width.workspace = true

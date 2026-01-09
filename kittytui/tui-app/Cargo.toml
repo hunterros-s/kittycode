@@ -1,0 +1,19 @@
+[package]
+name = "tui-app"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "kittytui"
+path = "src/main.rs"
+
+[dependencies]
+tui-core.workspace = true
+tui-terminal.workspace = true
+tui-cells.workspace = true
+tui-input.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
