@@ -46,6 +46,16 @@ impl Textarea {
         self.buffer.lines().count().max(1)
     }
 
+    pub fn insert_char(&mut self, c: char) {
+        self.buffer.insert_char(c);
+        self.history.reset();
+    }
+
+    pub fn set_text(&mut self, text: &str) {
+        self.buffer.set_text(text);
+        self.history.reset();
+    }
+
     fn should_browse_history_up(&self) -> bool {
         self.buffer.is_empty()
             || (self.buffer.current_line() == 0 && self.history.is_browsing())
