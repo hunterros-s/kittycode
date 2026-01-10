@@ -1,8 +1,28 @@
 use std::borrow::Cow;
+use std::fmt::Debug;
 
 use ratatui::text::Line;
 use tui_core::{CellCategory, CellData};
 use tui_render::{render_markdown, wrap_lines, WrapOptions};
+
+mod error;
+mod spinner;
+mod tool_call;
+
+pub use error::ErrorCell;
+pub use spinner::spinner;
+pub use tool_call::{ToolCallCell, ToolOutput, ToolStatus};
+
+/// Trait for renderable cell content.
+pub trait Cell: Debug + Send + Sync {
+    /// Render cell content as styled lines.
+    fn render_lines(&self, width: u16) -> Vec<Line<'static>>;
+
+    /// Height in lines for layout.
+    fn height(&self, width: u16) -> u16 {
+        self.render_lines(width).len() as u16
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct UserMessage {
@@ -76,18 +96,18 @@ impl CellData for AgentMessage {
 }
 
 #[derive(Debug, Clone)]
-pub enum Cell {
+pub enum MessageCell {
     User(UserMessage),
     Agent(AgentMessage),
 }
 
-impl Cell {
+impl MessageCell {
     pub fn user(text: impl Into<String>) -> Self {
-        Cell::User(UserMessage::new(text))
+        MessageCell::User(UserMessage::new(text))
     }
 
     pub fn agent(text: impl Into<String>) -> Self {
-        Cell::Agent(AgentMessage::new(text))
+        MessageCell::Agent(AgentMessage::new(text))
     }
 }
 
@@ -152,20 +172,20 @@ mod tests {
     }
 
     #[test]
-    fn cell_user_constructor() {
-        let cell = Cell::user("hello");
+    fn message_cell_user_constructor() {
+        let cell = MessageCell::user("hello");
         match cell {
-            Cell::User(msg) => assert_eq!(msg.text, "hello"),
-            Cell::Agent(_) => panic!("Expected User variant"),
+            MessageCell::User(msg) => assert_eq!(msg.text, "hello"),
+            MessageCell::Agent(_) => panic!("Expected User variant"),
         }
     }
 
     #[test]
-    fn cell_agent_constructor() {
-        let cell = Cell::agent("world");
+    fn message_cell_agent_constructor() {
+        let cell = MessageCell::agent("world");
         match cell {
-            Cell::Agent(msg) => assert_eq!(msg.text_content(), "world"),
-            Cell::User(_) => panic!("Expected Agent variant"),
+            MessageCell::Agent(msg) => assert_eq!(msg.text_content(), "world"),
+            MessageCell::User(_) => panic!("Expected Agent variant"),
         }
     }
 
