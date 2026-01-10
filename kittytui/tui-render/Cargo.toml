@@ -7,5 +7,6 @@ edition.workspace = true
 ratatui.workspace = true
 pulldown-cmark.workspace = true
 unicode-width.workspace = true
+textwrap = "0.16"
 
 [dev-dependencies]

@@ -11,6 +11,7 @@ use tokio::task::JoinHandle;
 use tui_cells::Cell;
 use tui_core::{InputHandler, InputResult};
 use tui_input::Textarea;
+use tui_render::{wrap_lines, WrapOptions};
 use tui_terminal::{Frame, Tui};
 
 pub mod protocol;
@@ -145,25 +146,40 @@ impl App {
     }
 
     fn cell_to_lines(&self, cell: &Cell) -> Vec<Line<'static>> {
-        let width = terminal::size().map(|(w, _)| w).unwrap_or(80);
+        let width = terminal::size().map(|(w, _)| w).unwrap_or(80) as usize;
         let mut lines = Vec::new();
 
         match cell {
             Cell::User(msg) => {
                 lines.push(Line::from(vec![
-                    Span::styled("You: ", Style::default().fg(Color::Cyan)),
-                    Span::raw(msg.text.clone()),
+                    Span::styled("● ", Style::default().fg(Color::Cyan)),
+                    Span::styled("You:", Style::default().fg(Color::Cyan)),
                 ]));
+                let opts = WrapOptions::new(width)
+                    .initial_indent(Line::from(vec![
+                        Span::styled("│ ", Style::default().fg(Color::DarkGray)),
+                    ]))
+                    .subsequent_indent(Line::from(vec![
+                        Span::styled("│ ", Style::default().fg(Color::DarkGray)),
+                    ]));
+                let wrapped = wrap_lines(vec![Line::raw(msg.text.clone())], opts);
+                lines.extend(wrapped);
                 lines.push(Line::default());
             }
             Cell::Agent(msg) => {
-                lines.push(Line::styled(
-                    "Agent:",
-                    Style::default().fg(Color::Green),
-                ));
-                for line in msg.render_wrapped(width.saturating_sub(2)) {
-                    lines.push(line);
-                }
+                lines.push(Line::from(vec![
+                    Span::styled("● ", Style::default().fg(Color::Green)),
+                    Span::styled("Agent:", Style::default().fg(Color::Green)),
+                ]));
+                let opts = WrapOptions::new(width)
+                    .initial_indent(Line::from(vec![
+                        Span::styled("│ ", Style::default().fg(Color::DarkGray)),
+                    ]))
+                    .subsequent_indent(Line::from(vec![
+                        Span::styled("│ ", Style::default().fg(Color::DarkGray)),
+                    ]));
+                let wrapped = wrap_lines(msg.render().to_vec(), opts);
+                lines.extend(wrapped);
                 lines.push(Line::default());
             }
         }
