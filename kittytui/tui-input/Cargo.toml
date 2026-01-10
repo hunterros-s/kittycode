@@ -8,3 +8,4 @@ tui-core.workspace = true
 crossterm.workspace = true
 ratatui.workspace = true
 unicode-width.workspace = true
+unicode-segmentation = "1.10"
