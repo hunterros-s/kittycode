@@ -104,3 +104,35 @@ impl ChatMessage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chat_message_user() {
+        let msg = ChatMessage::user("hello");
+        assert_eq!(msg.role, "user");
+        assert_eq!(msg.content, "hello");
+    }
+
+    #[test]
+    fn chat_message_assistant() {
+        let msg = ChatMessage::assistant("world");
+        assert_eq!(msg.role, "assistant");
+        assert_eq!(msg.content, "world");
+    }
+
+    #[test]
+    fn chat_message_system() {
+        let msg = ChatMessage::system("instructions");
+        assert_eq!(msg.role, "system");
+        assert_eq!(msg.content, "instructions");
+    }
+
+    #[test]
+    fn chat_message_accepts_string() {
+        let msg = ChatMessage::user(String::from("owned"));
+        assert_eq!(msg.content, "owned");
+    }
+}

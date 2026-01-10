@@ -1,3 +1,7 @@
+mod wrap;
+
+pub use wrap::{word_wrap, wrap_lines, WrapOptions};
+
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -117,5 +121,38 @@ mod tests {
         assert!(lines[0].to_string().contains("•"));
         assert!(lines[0].to_string().contains("Item 1"));
         assert!(lines[1].to_string().contains("Item 2"));
+    }
+
+    #[test]
+    fn test_empty_input() {
+        let lines = render_markdown("");
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn test_whitespace_only() {
+        let lines = render_markdown("   ");
+        assert!(lines.is_empty() || lines.iter().all(|l| l.spans.is_empty()));
+    }
+
+    #[test]
+    fn test_code_block() {
+        let lines = render_markdown("```\nlet x = 1;\n```");
+        assert!(!lines.is_empty());
+        assert!(lines.iter().any(|l| l.to_string().contains("let x = 1")));
+    }
+
+    #[test]
+    fn test_nested_bold_italic() {
+        let lines = render_markdown("***bold and italic***");
+        assert!(!lines.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_paragraphs() {
+        let lines = render_markdown("First paragraph.\n\nSecond paragraph.");
+        assert!(lines.len() >= 2);
+        assert!(lines.iter().any(|l| l.to_string().contains("First")));
+        assert!(lines.iter().any(|l| l.to_string().contains("Second")));
     }
 }

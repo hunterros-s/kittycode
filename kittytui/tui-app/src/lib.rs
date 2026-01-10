@@ -2,22 +2,22 @@ use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::event::Event;
-use ratatui::layout::{Constraint, Layout, Rect};
+use crossterm::terminal;
+use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use tokio::task::JoinHandle;
 use tui_cells::Cell;
 use tui_core::{InputHandler, InputResult};
 use tui_input::Textarea;
-use tui_terminal::Terminal;
+use tui_terminal::{Frame, Tui};
 
 pub mod protocol;
 
 use protocol::{ChatMessage, OpenAIClient};
 
 pub struct App {
-    history: Vec<Cell>,
     chat_history: Vec<ChatMessage>,
     input: Textarea,
     client: OpenAIClient,
@@ -28,7 +28,6 @@ pub struct App {
 impl App {
     pub fn new(client: OpenAIClient) -> Self {
         Self {
-            history: Vec::new(),
             chat_history: Vec::new(),
             input: Textarea::new(),
             client,
@@ -37,9 +36,9 @@ impl App {
         }
     }
 
-    pub async fn run(mut self, terminal: &mut Terminal) -> Result<()> {
+    pub async fn run(mut self, mut tui: Tui) -> Result<()> {
         loop {
-            terminal.draw(|frame| self.render(frame))?;
+            tui.draw(|frame| self.render(frame))?;
 
             if self.should_exit {
                 break;
@@ -52,83 +51,55 @@ impl App {
                         match result {
                             Ok(Ok(response)) => {
                                 self.chat_history.push(ChatMessage::assistant(&response));
-                                self.history.push(Cell::agent(response));
+                                let cell = Cell::agent(&response);
+                                let lines = self.cell_to_lines(&cell);
+                                tui.insert_history(lines)?;
                             }
                             Ok(Err(e)) => {
-                                self.history.push(Cell::agent(format!("**Error:** {}", e)));
+                                let cell = Cell::agent(format!("**Error:** {}", e));
+                                let lines = self.cell_to_lines(&cell);
+                                tui.insert_history(lines)?;
                             }
                             Err(e) => {
-                                self.history.push(Cell::agent(format!("**Error:** {}", e)));
+                                let cell = Cell::agent(format!("**Error:** {}", e));
+                                let lines = self.cell_to_lines(&cell);
+                                tui.insert_history(lines)?;
                             }
                         }
                     }
                     _ = tokio::time::sleep(Duration::from_millis(50)) => {
                         if let Some(event) = tui_terminal::poll_event(Duration::from_millis(1))? {
-                            self.handle_event(event);
+                            self.handle_event(&mut tui, event)?;
                         }
                     }
                 }
             } else if let Some(event) = tui_terminal::poll_event(Duration::from_millis(100))? {
-                self.handle_event(event);
+                self.handle_event(&mut tui, event)?;
             }
         }
+
+        tui.restore()?;
         Ok(())
     }
 
-    fn render(&self, frame: &mut ratatui::Frame) {
+    fn render(&self, frame: &mut Frame) {
         let area = frame.area();
 
-        let [history_area, input_area] =
-            Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(area);
-
-        self.render_history(frame, history_area);
-        self.render_input(frame, input_area);
-    }
-
-    fn render_history(&self, frame: &mut ratatui::Frame, area: Rect) {
-        let mut lines: Vec<Line> = Vec::new();
-
-        for cell in &self.history {
-            match cell {
-                Cell::User(msg) => {
-                    lines.push(Line::from(vec![
-                        Span::styled("You: ", Style::default().fg(Color::Cyan)),
-                        Span::raw(&msg.text),
-                    ]));
-                    lines.push(Line::default());
-                }
-                Cell::Agent(msg) => {
-                    lines.push(Line::styled(
-                        "Agent:",
-                        Style::default().fg(Color::Green),
-                    ));
-                    for line in msg.render() {
-                        lines.push(line.clone());
-                    }
-                    lines.push(Line::default());
-                }
-            }
-        }
+        let [status_area, input_area] =
+            Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
 
         if self.pending_response.is_some() {
-            lines.push(Line::styled(
+            let status = Paragraph::new(Line::styled(
                 "Thinking...",
                 Style::default().fg(Color::Yellow),
             ));
+            frame.render_widget(status, status_area);
         }
 
-        let total_lines = lines.len() as u16;
-        let scroll_offset = total_lines.saturating_sub(area.height);
-
-        let para = Paragraph::new(lines)
-            .block(Block::default().borders(Borders::NONE))
-            .wrap(Wrap { trim: false })
-            .scroll((scroll_offset, 0));
-
-        frame.render_widget(para, area);
+        self.render_input(frame, input_area);
     }
 
-    fn render_input(&self, frame: &mut ratatui::Frame, area: Rect) {
+    fn render_input(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
         let title = if self.pending_response.is_some() {
             " Message (waiting...) "
         } else {
@@ -139,15 +110,21 @@ impl App {
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
+        // Clear the input area before rendering to remove leftover characters
+        frame.render_widget(Clear, inner);
         frame.render_widget(&self.input, inner);
     }
 
-    fn handle_event(&mut self, event: Event) {
+    fn handle_event(&mut self, tui: &mut Tui, event: Event) -> Result<()> {
         if let Event::Key(key) = event {
             match self.input.handle_key(key) {
                 InputResult::Submit(text) => {
                     if !text.trim().is_empty() && self.pending_response.is_none() {
-                        self.history.push(Cell::user(&text));
+                        // Commit user message to scrollback
+                        let cell = Cell::user(&text);
+                        let lines = self.cell_to_lines(&cell);
+                        tui.insert_history(lines)?;
+
                         self.chat_history.push(ChatMessage::user(&text));
 
                         let client = self.client.clone();
@@ -164,5 +141,33 @@ impl App {
                 InputResult::Consumed | InputResult::Ignored => {}
             }
         }
+        Ok(())
+    }
+
+    fn cell_to_lines(&self, cell: &Cell) -> Vec<Line<'static>> {
+        let width = terminal::size().map(|(w, _)| w).unwrap_or(80);
+        let mut lines = Vec::new();
+
+        match cell {
+            Cell::User(msg) => {
+                lines.push(Line::from(vec![
+                    Span::styled("You: ", Style::default().fg(Color::Cyan)),
+                    Span::raw(msg.text.clone()),
+                ]));
+                lines.push(Line::default());
+            }
+            Cell::Agent(msg) => {
+                lines.push(Line::styled(
+                    "Agent:",
+                    Style::default().fg(Color::Green),
+                ));
+                for line in msg.render_wrapped(width.saturating_sub(2)) {
+                    lines.push(line);
+                }
+                lines.push(Line::default());
+            }
+        }
+
+        lines
     }
 }

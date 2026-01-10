@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use ratatui::text::Line;
 use tui_core::{CellCategory, CellData};
-use tui_render::render_markdown;
+use tui_render::{render_markdown, wrap_lines, WrapOptions};
 
 #[derive(Debug, Clone)]
 pub struct UserMessage {
@@ -42,8 +42,19 @@ impl AgentMessage {
         &self.rendered
     }
 
-    pub fn height(&self, _width: u16) -> u16 {
-        self.rendered.len() as u16
+    pub fn render_wrapped(&self, width: u16) -> Vec<Line<'static>> {
+        if width == 0 {
+            return self.rendered.clone();
+        }
+        wrap_lines(self.rendered.clone(), width as usize, &WrapOptions::default())
+    }
+
+    pub fn height(&self, width: u16) -> u16 {
+        if width == 0 {
+            self.rendered.len() as u16
+        } else {
+            self.render_wrapped(width).len() as u16
+        }
     }
 }
 
@@ -70,5 +81,87 @@ impl Cell {
 
     pub fn agent(text: impl Into<String>) -> Self {
         Cell::Agent(AgentMessage::new(text))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_message_new() {
+        let msg = UserMessage::new("hello");
+        assert_eq!(msg.text, "hello");
+    }
+
+    #[test]
+    fn user_message_cell_data() {
+        let msg = UserMessage::new("test");
+        assert_eq!(msg.category(), CellCategory::UserMessage);
+        assert_eq!(msg.text_content(), "test");
+    }
+
+    #[test]
+    fn agent_message_new() {
+        let msg = AgentMessage::new("hello world");
+        assert_eq!(msg.text_content(), "hello world");
+    }
+
+    #[test]
+    fn agent_message_cell_data() {
+        let msg = AgentMessage::new("test");
+        assert_eq!(msg.category(), CellCategory::AgentMessage);
+        assert_eq!(msg.text_content(), "test");
+    }
+
+    #[test]
+    fn agent_message_renders_markdown() {
+        let msg = AgentMessage::new("**bold**");
+        let rendered = msg.render();
+        assert!(!rendered.is_empty());
+    }
+
+    #[test]
+    fn agent_message_render_wrapped() {
+        let msg = AgentMessage::new("This is a very long line that should wrap when rendered with a small width");
+        let wrapped = msg.render_wrapped(20);
+        assert!(wrapped.len() > 1);
+    }
+
+    #[test]
+    fn agent_message_height_with_wrap() {
+        let msg = AgentMessage::new("Short");
+        assert_eq!(msg.height(0), 1);
+        assert_eq!(msg.height(80), 1);
+    }
+
+    #[test]
+    fn cell_user_constructor() {
+        let cell = Cell::user("hello");
+        match cell {
+            Cell::User(msg) => assert_eq!(msg.text, "hello"),
+            Cell::Agent(_) => panic!("Expected User variant"),
+        }
+    }
+
+    #[test]
+    fn cell_agent_constructor() {
+        let cell = Cell::agent("world");
+        match cell {
+            Cell::Agent(msg) => assert_eq!(msg.text_content(), "world"),
+            Cell::User(_) => panic!("Expected Agent variant"),
+        }
+    }
+
+    #[test]
+    fn user_message_is_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<UserMessage>();
+    }
+
+    #[test]
+    fn agent_message_is_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<AgentMessage>();
     }
 }
