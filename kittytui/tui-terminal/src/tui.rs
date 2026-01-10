@@ -2,12 +2,15 @@ use std::fmt;
 use std::io::{self, stdout, Stdout, Write};
 
 use crossterm::cursor::{MoveTo, position};
+use crossterm::event::{
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
 use crossterm::queue;
 use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
 use crossterm::terminal::{self, Clear, ClearType};
 use crossterm::Command;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Rect, Size};
+use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 
@@ -163,6 +166,7 @@ pub struct Tui {
     terminal: InlineTerminal<CrosstermBackend<Stdout>>,
     viewport_top: u16,    // Top row of viewport (0-based)
     viewport_height: u16, // Height of viewport
+    keyboard_enhanced: bool, // Whether keyboard enhancement is active
 }
 
 impl Tui {
@@ -172,6 +176,16 @@ impl Tui {
         terminal::enable_raw_mode()?;
 
         let mut stdout_handle = stdout();
+
+        // Enable keyboard enhancement for Shift+Enter support (kitty protocol)
+        // Only use DISAMBIGUATE_ESCAPE_CODES - REPORT_ALL_KEYS breaks Shift+letter
+        queue!(
+            stdout_handle,
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        )?;
+        stdout_handle.flush()?;
+        let keyboard_enhanced = true;
+
         let (cols, rows) = terminal::size()?;
         let (_, cursor_y) = position()?;
 
@@ -208,6 +222,7 @@ impl Tui {
             terminal,
             viewport_top,
             viewport_height,
+            keyboard_enhanced,
         })
     }
 
@@ -290,14 +305,68 @@ impl Tui {
         Ok(())
     }
 
-    /// Get terminal size.
-    pub fn size(&self) -> io::Result<Size> {
-        self.terminal.size()
+    /// Set viewport to target height (grows or shrinks as needed).
+    pub fn set_height(&mut self, target_height: u16) -> io::Result<()> {
+        let (cols, rows) = terminal::size()?;
+        let target_height = target_height.min(rows).max(1);
+
+        let mut new_top = self.viewport_top;
+
+        if target_height > self.viewport_height {
+            // Growing - scroll up if we'd go past screen bottom
+            let new_bottom = new_top + target_height;
+            if new_bottom > rows && new_top > 0 {
+                let scroll_needed = new_bottom - rows;
+                let actual_scroll = scroll_needed.min(new_top);
+                self.scroll_region_up(0, new_top, actual_scroll)?;
+                new_top = new_top.saturating_sub(actual_scroll);
+            }
+        }
+        // When shrinking, viewport stays in place (adjacent to content above)
+
+        let area = Rect::new(0, new_top, cols, target_height);
+        let current_area = Rect::new(0, self.viewport_top, cols, self.viewport_height);
+
+        if area != current_area {
+            self.viewport_top = new_top;
+            self.viewport_height = target_height;
+            self.terminal.clear()?;
+            self.terminal.set_viewport_area(area);
+        }
+
+        Ok(())
+    }
+
+    /// Scroll a region of the screen up, pushing content into scrollback.
+    fn scroll_region_up(&self, top: u16, bottom: u16, count: u16) -> io::Result<()> {
+        let mut stdout = stdout();
+
+        // Set scroll region to the area above viewport
+        queue!(stdout, SetScrollRegion {
+            top: top + 1,    // 1-based
+            bottom: bottom,  // 1-based (exclusive becomes inclusive)
+        })?;
+
+        // Move cursor to bottom of region and scroll up
+        queue!(stdout, MoveTo(0, bottom.saturating_sub(1)))?;
+        for _ in 0..count {
+            queue!(stdout, Print("\n"))?;
+        }
+
+        queue!(stdout, ResetScrollRegion)?;
+        stdout.flush()?;
+
+        Ok(())
     }
 
     /// Restore terminal to normal state.
     pub fn restore(self) -> io::Result<()> {
         let mut stdout = stdout();
+
+        // Pop keyboard enhancement flags if they were enabled
+        if self.keyboard_enhanced {
+            let _ = queue!(stdout, PopKeyboardEnhancementFlags);
+        }
 
         // Reset scroll region
         queue!(stdout, ResetScrollRegion)?;

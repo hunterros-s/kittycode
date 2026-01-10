@@ -39,6 +39,10 @@ impl App {
 
     pub async fn run(mut self, mut tui: Tui) -> Result<()> {
         loop {
+            // Set viewport height for input + status line (grows and shrinks)
+            let needed_height = self.input.line_count() as u16 + 2; // +1 border, +1 status
+            tui.set_height(needed_height)?;
+
             tui.draw(|frame| self.render(frame))?;
 
             if self.should_exit {
@@ -86,8 +90,11 @@ impl App {
     fn render(&self, frame: &mut Frame) {
         let area = frame.area();
 
+        // Dynamic input height: line count + 1 for border
+        let input_height = self.input.line_count() as u16 + 1;
+
         let [status_area, input_area] =
-            Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
+            Layout::vertical([Constraint::Length(1), Constraint::Length(input_height)]).areas(area);
 
         if self.pending_response.is_some() {
             let status = Paragraph::new(Line::styled(
@@ -121,7 +128,11 @@ impl App {
             match self.input.handle_key(key) {
                 InputResult::Submit(text) => {
                     if !text.trim().is_empty() && self.pending_response.is_none() {
-                        // Commit user message to scrollback
+                        // Shrink viewport FIRST (textarea is now empty after submit)
+                        let new_height = self.input.line_count() as u16 + 2;
+                        tui.set_height(new_height)?;
+
+                        // Now insert history with correct viewport dimensions
                         let cell = Cell::user(&text);
                         let lines = self.cell_to_lines(&cell);
                         tui.insert_history(lines)?;
@@ -162,7 +173,7 @@ impl App {
                     .subsequent_indent(Line::from(vec![
                         Span::styled("│ ", Style::default().fg(Color::DarkGray)),
                     ]));
-                let wrapped = wrap_lines(vec![Line::raw(msg.text.clone())], opts);
+                let wrapped = wrap_lines(msg.render(), opts);
                 lines.extend(wrapped);
                 lines.push(Line::default());
             }

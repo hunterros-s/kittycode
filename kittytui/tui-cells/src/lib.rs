@@ -13,6 +13,13 @@ impl UserMessage {
     pub fn new(text: impl Into<String>) -> Self {
         Self { text: text.into() }
     }
+
+    pub fn render(&self) -> Vec<Line<'static>> {
+        self.text
+            .lines()
+            .map(|line| Line::raw(line.to_string()))
+            .collect()
+    }
 }
 
 impl CellData for UserMessage {
@@ -92,6 +99,15 @@ mod tests {
     fn user_message_new() {
         let msg = UserMessage::new("hello");
         assert_eq!(msg.text, "hello");
+    }
+
+    #[test]
+    fn user_message_multiline_renders_separate_lines() {
+        let msg = UserMessage::new("line one\nline two");
+        let rendered = msg.render();
+        assert_eq!(rendered.len(), 2, "Multiline message should render as separate lines");
+        assert_eq!(rendered[0].to_string(), "line one");
+        assert_eq!(rendered[1].to_string(), "line two");
     }
 
     #[test]
