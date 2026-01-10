@@ -8,5 +8,11 @@ ratatui.workspace = true
 pulldown-cmark.workspace = true
 unicode-width.workspace = true
 textwrap = "0.16"
+tree-sitter-highlight = "0.24"
+tree-sitter-rust = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-bash = "0.23"
+tree-sitter-json = "0.23"
 
 [dev-dependencies]

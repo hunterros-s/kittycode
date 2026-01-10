@@ -1,4 +1,4 @@
-use pulldown_cmark::{Alignment, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
@@ -20,6 +20,7 @@ struct MarkdownRenderer {
 
     in_code_block: bool,
     code_block_content: String,
+    code_block_lang: Option<String>,
 
     current_heading: Option<HeadingLevel>,
     pending_link_url: Option<String>,
@@ -48,6 +49,7 @@ impl MarkdownRenderer {
             list_indices: Vec::new(),
             in_code_block: false,
             code_block_content: String::new(),
+            code_block_lang: None,
             current_heading: None,
             pending_link_url: None,
             pending_marker_line: false,
@@ -170,9 +172,20 @@ impl MarkdownRenderer {
                 });
                 self.push_inline_style(self.styles.blockquote);
             }
-            Tag::CodeBlock(_) => {
+            Tag::CodeBlock(kind) => {
                 self.in_code_block = true;
                 self.code_block_content.clear();
+                self.code_block_lang = match kind {
+                    CodeBlockKind::Fenced(lang) => {
+                        let lang = lang.to_string();
+                        if lang.is_empty() {
+                            None
+                        } else {
+                            Some(lang)
+                        }
+                    }
+                    CodeBlockKind::Indented => None,
+                };
             }
             Tag::List(ordered) => {
                 if ordered.is_some() {
@@ -246,9 +259,20 @@ impl MarkdownRenderer {
             TagEnd::CodeBlock => {
                 self.in_code_block = false;
                 let content = std::mem::take(&mut self.code_block_content);
-                let style = self.styles.code_block;
-                for line in content.lines() {
-                    self.push_line(Line::from(vec![Span::styled(line.to_string(), style)]));
+                let lang = self.code_block_lang.take();
+
+                let highlighted_lines = if let Some(lang) = lang {
+                    crate::highlight::highlight_code(&content, &lang)
+                } else {
+                    let style = self.styles.code_block;
+                    content
+                        .lines()
+                        .map(|l| Line::styled(l.to_string(), style))
+                        .collect()
+                };
+
+                for line in highlighted_lines {
+                    self.push_line(line);
                 }
                 self.flush_current_line();
                 self.lines.push(Line::default()); // blank line after code block
