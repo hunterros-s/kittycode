@@ -7,7 +7,7 @@ use crossterm::event::{
 };
 use crossterm::queue;
 use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
-use crossterm::terminal::{self, Clear, ClearType};
+use crossterm::terminal::{self, BeginSynchronizedUpdate, Clear, ClearType, EndSynchronizedUpdate};
 use crossterm::Command;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
@@ -167,6 +167,7 @@ pub struct Tui {
     viewport_top: u16,    // Top row of viewport (0-based)
     viewport_height: u16, // Height of viewport
     keyboard_enhanced: bool, // Whether keyboard enhancement is active
+    pending_history: Vec<Line<'static>>, // Lines to insert before next draw
 }
 
 impl Tui {
@@ -223,15 +224,23 @@ impl Tui {
             viewport_top,
             viewport_height,
             keyboard_enhanced,
+            pending_history: Vec::new(),
         })
     }
 
-    /// Insert lines into scrollback above the viewport.
-    pub fn insert_history(&mut self, lines: Vec<Line<'static>>) -> io::Result<()> {
-        if lines.is_empty() {
+    /// Queue lines to be inserted into scrollback above the viewport.
+    /// Lines are actually inserted during the next draw() call.
+    pub fn queue_history(&mut self, lines: Vec<Line<'static>>) {
+        self.pending_history.extend(lines);
+    }
+
+    /// Execute the actual history insertion (called inside draw's synchronized update).
+    fn flush_pending_history(&mut self) -> io::Result<()> {
+        if self.pending_history.is_empty() {
             return Ok(());
         }
 
+        let lines = std::mem::take(&mut self.pending_history);
         let mut stdout = stdout();
         let (cols, rows) = terminal::size()?;
         let num_lines = lines.len() as u16;
@@ -282,12 +291,7 @@ impl Tui {
         // Restore cursor into viewport
         queue!(stdout, MoveTo(0, plan.final_viewport_top))?;
 
-        // Flush all escape sequences
-        stdout.flush()?;
-
         // Update InlineTerminal's viewport area if it moved.
-        // Unlike ratatui's Terminal, InlineTerminal.set_viewport_area() resizes
-        // buffers WITHOUT clearing the screen, preserving diff state.
         if plan.push_viewport.is_some() {
             let new_area = Rect::new(0, self.viewport_top, cols, self.viewport_height);
             self.terminal.set_viewport_area(new_area);
@@ -296,43 +300,51 @@ impl Tui {
         Ok(())
     }
 
-    /// Draw the TUI frame.
-    pub fn draw<F>(&mut self, f: F) -> io::Result<()>
+    /// Draw the TUI frame with atomic resize + history insert + render.
+    /// All operations happen inside a synchronized update - no intermediate visual states.
+    pub fn draw<F>(&mut self, height: u16, draw_fn: F) -> io::Result<()>
     where
         F: FnOnce(&mut Frame),
     {
-        self.terminal.draw(f)?;
-        Ok(())
-    }
-
-    /// Set viewport to target height (grows or shrinks as needed).
-    pub fn set_height(&mut self, target_height: u16) -> io::Result<()> {
+        let mut stdout = stdout();
         let (cols, rows) = terminal::size()?;
-        let target_height = target_height.min(rows).max(1);
+        let height = height.min(rows).max(1);
 
+        // Begin synchronized update - terminal buffers all changes
+        queue!(stdout, BeginSynchronizedUpdate)?;
+        stdout.flush()?;
+
+        // 1. Resize viewport if needed (top stays fixed)
         let mut new_top = self.viewport_top;
+        let new_bottom = new_top + height;
 
-        if target_height > self.viewport_height {
-            // Growing - scroll up if we'd go past screen bottom
-            let new_bottom = new_top + target_height;
-            if new_bottom > rows && new_top > 0 {
-                let scroll_needed = new_bottom - rows;
-                let actual_scroll = scroll_needed.min(new_top);
-                self.scroll_region_up(0, new_top, actual_scroll)?;
-                new_top = new_top.saturating_sub(actual_scroll);
-            }
+        // Handle overflow at bottom - scroll up to make room
+        if height > self.viewport_height && new_bottom > rows && new_top > 0 {
+            let scroll_needed = new_bottom - rows;
+            let actual_scroll = scroll_needed.min(new_top);
+            self.scroll_region_up(0, new_top, actual_scroll)?;
+            new_top = new_top.saturating_sub(actual_scroll);
         }
-        // When shrinking, viewport stays in place (adjacent to content above)
 
-        let area = Rect::new(0, new_top, cols, target_height);
+        let new_area = Rect::new(0, new_top, cols, height);
         let current_area = Rect::new(0, self.viewport_top, cols, self.viewport_height);
 
-        if area != current_area {
+        if new_area != current_area {
             self.viewport_top = new_top;
-            self.viewport_height = target_height;
+            self.viewport_height = height;
             self.terminal.clear()?;
-            self.terminal.set_viewport_area(area);
+            self.terminal.set_viewport_area(new_area);
         }
+
+        // 2. Insert any pending history lines AFTER resize
+        self.flush_pending_history()?;
+
+        // 3. Draw
+        self.terminal.draw(draw_fn)?;
+
+        // End synchronized update - terminal flushes all at once
+        queue!(stdout, EndSynchronizedUpdate)?;
+        stdout.flush()?;
 
         Ok(())
     }
