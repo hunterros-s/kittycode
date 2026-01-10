@@ -240,4 +240,47 @@ mod tests {
         ta.handle_key(key(KeyCode::Backspace));
         assert_eq!(ta.content(), "本");
     }
+
+    #[test]
+    fn test_submit_clears_completely() {
+        // This test verifies that after submit, the textarea is COMPLETELY clear
+        // and subsequent typing starts fresh
+        let mut ta = Textarea::new();
+
+        // Type "test123"
+        for c in "test123".chars() {
+            ta.handle_key(key(KeyCode::Char(c)));
+        }
+        assert_eq!(ta.content(), "test123");
+        assert_eq!(ta.cursor(), 7);
+
+        // Submit
+        let result = ta.handle_key(key(KeyCode::Enter));
+        assert_eq!(result, InputResult::Submit("test123".to_string()));
+
+        // After submit, content MUST be empty and cursor at 0
+        assert_eq!(ta.content(), "", "Content should be empty after submit");
+        assert_eq!(ta.cursor(), 0, "Cursor should be at 0 after submit");
+
+        // Type new content - should start fresh, not append to old
+        ta.handle_key(key(KeyCode::Char('a')));
+        assert_eq!(ta.content(), "a", "New typing should start fresh");
+        assert_eq!(ta.cursor(), 1);
+    }
+
+    #[test]
+    fn test_submit_then_immediate_resubmit() {
+        // Edge case: submit, then immediately press Enter again
+        let mut ta = Textarea::new();
+
+        ta.handle_key(key(KeyCode::Char('x')));
+        let result1 = ta.handle_key(key(KeyCode::Enter));
+        assert_eq!(result1, InputResult::Submit("x".to_string()));
+        assert_eq!(ta.content(), "");
+
+        // Pressing Enter again should submit empty string
+        let result2 = ta.handle_key(key(KeyCode::Enter));
+        assert_eq!(result2, InputResult::Submit("".to_string()));
+        assert_eq!(ta.content(), "");
+    }
 }
