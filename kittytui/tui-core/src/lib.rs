@@ -1,9 +1,13 @@
+mod flex;
+
 use std::borrow::Cow;
 use std::fmt::Debug;
 
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+
+pub use flex::{FlexItem, FlexRenderable, RenderableItem, Spacer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CellCategory {
@@ -22,6 +26,12 @@ pub enum InputResult {
     Submit(String),
     Exit,
     Ignored,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancellationEvent {
+    Handled,
+    NotHandled,
 }
 
 pub trait InputHandler {

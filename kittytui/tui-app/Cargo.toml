@@ -12,6 +12,7 @@ tui-core.workspace = true
 tui-terminal.workspace = true
 tui-cells.workspace = true
 tui-input.workspace = true
+tui-bottom-pane.workspace = true
 tui-render.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
