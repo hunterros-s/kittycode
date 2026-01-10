@@ -1,0 +1,12 @@
+[package]
+name = "tui-bottom-pane"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tui-core.workspace = true
+tui-input.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+
+[dev-dependencies]

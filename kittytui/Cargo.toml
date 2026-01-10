@@ -5,6 +5,7 @@ members = [
     "tui-render",
     "tui-cells",
     "tui-input",
+    "tui-bottom-pane",
     "tui-app",
 ]
 resolver = "2"
@@ -21,6 +22,7 @@ tui-terminal = { path = "tui-terminal" }
 tui-render = { path = "tui-render" }
 tui-cells = { path = "tui-cells" }
 tui-input = { path = "tui-input" }
+tui-bottom-pane = { path = "tui-bottom-pane" }
 ratatui = "0.28"
 crossterm = "0.28"
 pulldown-cmark = "0.11"
