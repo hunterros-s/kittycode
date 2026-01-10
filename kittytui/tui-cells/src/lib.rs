@@ -46,7 +46,7 @@ impl AgentMessage {
         if width == 0 {
             return self.rendered.clone();
         }
-        wrap_lines(self.rendered.clone(), width as usize, &WrapOptions::default())
+        wrap_lines(self.rendered.clone(), WrapOptions::new(width as usize))
     }
 
     pub fn height(&self, width: u16) -> u16 {
